@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PB Social Hub</title>
+  <style>
+    :root{--bg:#eef2f7;--card:#fff;--text:#18202a;--muted:#697386;--brand:#1877f2;--line:#e4e8ee}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Bengali",sans-serif}
+    header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line)}
+    .bar{max-width:900px;margin:auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
+    .logo{font-size:22px;font-weight:800;color:var(--brand)}.spacer{flex:1}
+    .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;background:#e9eef5;color:var(--text)}
+    .btn.primary{background:var(--brand);color:#fff}.btn.danger{background:#fee2e2;color:#b91c1c}
+    main{max-width:680px;margin:20px auto;padding:0 12px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden}
+    .pad{padding:16px}.composer textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:12px;padding:12px;resize:vertical;font:inherit}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}
+    .post-head{display:flex;gap:10px;align-items:center}.avatar{width:42px;height:42px;border-radius:50%;background:#dbeafe;display:grid;place-items:center;font-weight:800;color:#1d4ed8}
+    .name{font-weight:800}.time{font-size:12px;color:var(--muted)}.post-text{white-space:pre-wrap;line-height:1.55;margin:14px 0}
+    .media{width:100%;max-height:520px;object-fit:cover;background:#111}.actions{border-top:1px solid var(--line);padding:8px 12px}
+    .empty{text-align:center;padding:36px;color:var(--muted)}input[type=file]{display:none}
+    .small{font-size:12px;color:var(--muted)}.count{font-size:13px;color:var(--muted);padding:0 16px 8px}
+  </style>
+</head>
+<body>
+<header><div class="bar"><div class="logo">PB Social Hub</div><div class="spacer"></div><button class="btn danger" id="clearBtn">সব পোস্ট মুছুন</button></div></header>
+
+<main>
+  <section class="card composer">
+    <div class="pad">
+      <textarea id="postText" placeholder="আপনার মনে কী আছে?"></textarea>
+      <div class="row between" style="margin-top:10px">
+        <label class="btn" for="media">📷 ছবি / 🎥 ভিডিও</label>
+        <input id="media" type="file" accept="image/*,video/*">
+        <span class="small" id="fileName">কোনো মিডিয়া নেই</span>
+        <button class="btn primary" id="publish">পোস্ট করুন</button>
+      </div>
+      <div class="small" style="margin-top:10px">এই সংস্করণে পোস্ট আপনার ব্রাউজারের local storage-এ থাকে, তাই refresh বা বন্ধ/খোলার পরেও থাকে।</div>
+    </div>
+  </section>
+
+  <div class="count" id="count"></div>
+  <section id="feed"></section>
+</main>
+
+<script>
+const KEY = "pb_social_hub_posts_v1";
+let posts = loadPosts();
+let pendingMedia = null;
+
+function loadPosts(){
+  try { return JSON.parse(localStorage.getItem(KEY) || "[]"); }
+  catch(e){ return []; }
+}
+function savePosts(){ localStorage.setItem(KEY, JSON.stringify(posts)); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+function timeText(ts){ return new Date(ts).toLocaleString("bn-BD"); }
+
+function render(){
+  const feed = document.getElementById("feed");
+  document.getElementById("count").textContent = posts.length ? `${posts.length}টি পোস্ট` : "";
+  if(!posts.length){ feed.innerHTML = '<div class="card empty">এখনও কোনো পোস্ট নেই। প্রথম পোস্টটি আপনি করুন।</div>'; return; }
+
+  feed.innerHTML = posts.map(p => `
+    <article class="card">
+      <div class="pad">
+        <div class="post-head">
+          <div class="avatar">PB</div>
+          <div><div class="name">PB Social Hub</div><div class="time">${esc(timeText(p.createdAt))}</div></div>
+        </div>
+        ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ""}
+      </div>
+      ${p.media ? (p.mediaType.startsWith("video/") ? `<video class="media" controls src="${p.media}"></video>` : `<img class="media" src="${p.media}" alt="Post media">`) : ""}
+      <div class="actions"><button class="btn" onclick="removePost('${p.id}')">মুছুন</button></div>
+    </article>`).join("");
+}
+
+function removePost(id){
+  posts = posts.filter(p => p.id !== id);
+  savePosts(); render();
+}
+
+document.getElementById("media").addEventListener("change", e => {
+  const f = e.target.files[0];
+  pendingMedia = f || null;
+  document.getElementById("fileName").textContent = f ? f.name : "কোনো মিডিয়া নেই";
+});
+
+document.getElementById("publish").addEventListener("click", async () => {
+  const text = document.getElementById("postText").value.trim();
+  if(!text && !pendingMedia){ alert("পোস্টে লেখা বা ছবি/ভিডিও দিন।"); return; }
+
+  let media = null;
+  if(pendingMedia){
+    // Data URLs make this demo fully self-contained; a production version should use server storage.
+    media = await new Promise((resolve,reject)=>{
+      const r = new FileReader();
+      r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsDataURL(pendingMedia);
+    });
+  }
+
+  posts.unshift({
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+    text, media, mediaType: pendingMedia ? pendingMedia.type : "",
+    createdAt: Date.now()
+  });
+  try{
+    savePosts();
+  }catch(e){
+    alert("ব্রাউজারের storage সীমা পূর্ণ হয়েছে। বড় ভিডিও আপলোডের জন্য backend storage প্রয়োজন।");
+    posts.shift(); return;
+  }
+  document.getElementById("postText").value="";
+  document.getElementById("media").value="";
+  pendingMedia=null; document.getElementById("fileName").textContent="কোনো মিডিয়া নেই";
+  render();
+});
+
+document.getElementById("clearBtn").addEventListener("click", ()=>{
+  if(confirm("সব পোস্ট মুছে ফেলবেন?")){
+    posts=[]; savePosts(); render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>
